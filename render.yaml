@@ -1,9 +1,10 @@
 services:
-  - name: papi-backend
-    type: web
-    runtime: python
+  - type: web
+    name: papi-backend
+    env: python
     plan: free
-    region: ohio
-
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
