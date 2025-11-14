@@ -1,11 +1,10 @@
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from fastapi.responses import FileResponse
 import uuid
-import asyncio
-import tempfile
-import os
 import httpx
+import os
 
 app = FastAPI()
 
@@ -21,94 +20,111 @@ app.add_middleware(
 # Banco de Jobs (em memória)
 JOBS: dict[str, dict] = {}
 
-
-# Modelo de requisição para processar vídeo
+# Modelo da requisição
 class ProcessVideoRequest(BaseModel):
     video_url: str
     target_languages: list[str] = []
-
 
 @app.get("/")
 def root():
     return {"message": "PAPI backend online 🚀"}
 
-
 @app.get("/status")
 def status():
     return {"status": "ok"}
 
-
 @app.post("/echo")
-def echo(payload: dict):
-    return {"received": payload}
+def echo(data: dict):
+    return data
 
+# ------------------------------
+# FUNÇÃO PRINCIPAL DE PROCESSAR
+# ------------------------------
 
-# ⚡ Função que roda o processamento do vídeo
-async def run_process_video(job_id: str, params: ProcessVideoRequest):
-    """
-    Processa o vídeo de forma assíncrona:
-
-    Etapa 1 — Baixa o arquivo de vídeo da URL enviada.
-    (por enquanto só isso, mas depois colocamos transcrição, tradução e dublagem)
-    """
-
+async def run_process_video(job_id: str, video_url: str, target_languages: list[str]):
     try:
-        JOBS[job_id]["status"] = "processing"
-        video_url = params.video_url
+        # Baixar vídeo
+        async with httpx.AsyncClient() as client:
+            response = await client.get(video_url)
+            response.raise_for_status()
 
-        # Cria nome único no diretório temporário
-        suffix = f"_{job_id}.mp4"
-        tmp_dir = tempfile.gettempdir()
-        tmp_path = os.path.join(tmp_dir, f"papi_video{suffix}")
+        # Criar arquivo temporário
+        input_path = f"/tmp/papi_input_{job_id}.mp4"
+        with open(input_path, "wb") as f:
+            f.write(response.content)
 
-        # Baixar vídeo usando httpx (streaming)
-        async with httpx.AsyncClient(timeout=120) as client:
-            async with client.stream("GET", video_url) as resp:
-                resp.raise_for_status()
-                with open(tmp_path, "wb") as f:
-                    async for chunk in resp.aiter_bytes():
-                        f.write(chunk)
-
-        # Aqui no futuro entrará:
-        # - Extrair áudio (FFmpeg)
-        # - Whisper transcrever
-        # - Traduzir
-        # - Gerar dublagem
-        # - Montar novo vídeo
-        # Por enquanto o "resultado" é só o arquivo baixado.
+        # Aqui entraria WHISPER + TTS + tradução
+        # Simulação:
+        output_path = f"/tmp/papi_video_{job_id}.mp4"
+        with open(output_path, "wb") as f:
+            f.write(response.content)  # apenas copia na simulação
 
         JOBS[job_id]["status"] = "done"
-        JOBS[job_id]["result_url"] = tmp_path
+        JOBS[job_id]["result_url"] = output_path
         JOBS[job_id]["error"] = None
 
     except Exception as e:
         JOBS[job_id]["status"] = "error"
+        JOBS[job_id]["result_url"] = None
         JOBS[job_id]["error"] = str(e)
 
 
+# ------------------------------
+# ENDPOINT: PROCESSAR VÍDEO
+# ------------------------------
+
 @app.post("/process-video")
-async def process_video(request: ProcessVideoRequest, background: BackgroundTasks):
+async def process_video(request: ProcessVideoRequest, background_tasks: BackgroundTasks):
     job_id = str(uuid.uuid4())
 
     JOBS[job_id] = {
         "status": "queued",
         "result_url": None,
-        "error": None,
+        "error": None
     }
 
-    # Executa em background
-    background.add_task(run_process_video, job_id, request)
+    background_tasks.add_task(
+        run_process_video,
+        job_id,
+        request.video_url,
+        request.target_languages
+    )
 
     return {"job_id": job_id, "status": "queued"}
 
 
+# ------------------------------
+# ENDPOINT: STATUS DO JOB
+# ------------------------------
+
 @app.get("/job-status/{job_id}")
 def job_status(job_id: str):
     if job_id not in JOBS:
-        return {
-            "job_id": job_id,
-            "status": "not_found",
-            "error": "Job não encontrado"
-        }
+        return {"status": "not_found"}
 
-    return JOBS[job_id]
+    return {
+        "status": JOBS[job_id]["status"],
+        "result_url": JOBS[job_id]["result_url"],
+        "error": JOBS[job_id]["error"]
+    }
+
+
+# ------------------------------
+# ENDPOINT: DOWNLOAD FINAL
+# ------------------------------
+
+@app.get("/download/{job_id}")
+def download_result(job_id: str):
+    if job_id not in JOBS:
+        return {"error": "job_not_found"}
+
+    path = JOBS[job_id]["result_url"]
+
+    if not path or not os.path.exists(path):
+        return {"error": "file_not_ready"}
+
+    return FileResponse(
+        path,
+        media_type="video/mp4",
+        filename=f"papi_output_{job_id}.mp4"
+    )
