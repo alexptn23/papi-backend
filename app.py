@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-import uuid
 import asyncio
+import uuid
 
 app = FastAPI()
 
@@ -25,7 +25,7 @@ def root():
 def status():
     return {"status": "ok"}
 
-# 🔥 PROCESSAMENTO LEVE (Funciona no Render FREE)
+# 🚀 PROCESSAMENTO LEVE (Render FREE)
 @app.post("/process-video")
 async def process_video(file: UploadFile = File(...)):
     # cria um job_id único
@@ -34,16 +34,16 @@ async def process_video(file: UploadFile = File(...)):
     # registra o job como "processing"
     jobs[job_id] = {"status": "processing"}
 
-    # função interna só pra simular um processamento leve
+    # função interna para simular trabalho
     async def fake_processing():
-        await asyncio.sleep(2)  # simula trabalho
+        await asyncio.sleep(2)  # simula processamento leve
         jobs[job_id]["status"] = "completed"
 
     asyncio.create_task(fake_processing())
 
     return {"job_id": job_id}
 
-# Rota para consultar o status do job
+# Rota para consultar status do job
 @app.get("/job-status/{job_id}")
 def job_status(job_id: str):
     job = jobs.get(job_id)
