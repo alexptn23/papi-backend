@@ -1,10 +1,7 @@
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from fastapi.responses import FileResponse
 import uuid
-import httpx
-import os
+import asyncio
 
 app = FastAPI()
 
@@ -18,12 +15,7 @@ app.add_middleware(
 )
 
 # Banco de Jobs (em memória)
-JOBS: dict[str, dict] = {}
-
-# Modelo da requisição
-class ProcessVideoRequest(BaseModel):
-    video_url: str
-    target_languages: list[str] = []
+jobs: dict[str, dict] = {}
 
 @app.get("/")
 def root():
@@ -33,98 +25,28 @@ def root():
 def status():
     return {"status": "ok"}
 
-@app.post("/echo")
-def echo(data: dict):
-    return data
-
-# ------------------------------
-# FUNÇÃO PRINCIPAL DE PROCESSAR
-# ------------------------------
-
-async def run_process_video(job_id: str, video_url: str, target_languages: list[str]):
-    try:
-        # Baixar vídeo
-        async with httpx.AsyncClient() as client:
-            response = await client.get(video_url)
-            response.raise_for_status()
-
-        # Criar arquivo temporário
-        input_path = f"/tmp/papi_input_{job_id}.mp4"
-        with open(input_path, "wb") as f:
-            f.write(response.content)
-
-        # Aqui entraria WHISPER + TTS + tradução
-        # Simulação:
-        output_path = f"/tmp/papi_video_{job_id}.mp4"
-        with open(output_path, "wb") as f:
-            f.write(response.content)  # apenas copia na simulação
-
-        JOBS[job_id]["status"] = "done"
-        JOBS[job_id]["result_url"] = output_path
-        JOBS[job_id]["error"] = None
-
-    except Exception as e:
-        JOBS[job_id]["status"] = "error"
-        JOBS[job_id]["result_url"] = None
-        JOBS[job_id]["error"] = str(e)
-
-
-# ------------------------------
-# ENDPOINT: PROCESSAR VÍDEO
-# ------------------------------
-
+# 🔥 PROCESSAMENTO LEVE (Funciona no Render FREE)
 @app.post("/process-video")
-async def process_video(request: ProcessVideoRequest, background_tasks: BackgroundTasks):
+async def process_video(file: UploadFile = File(...)):
+    # cria um job_id único
     job_id = str(uuid.uuid4())
 
-    JOBS[job_id] = {
-        "status": "queued",
-        "result_url": None,
-        "error": None
-    }
+    # registra o job como "processing"
+    jobs[job_id] = {"status": "processing"}
 
-    background_tasks.add_task(
-        run_process_video,
-        job_id,
-        request.video_url,
-        request.target_languages
-    )
+    # função interna só pra simular um processamento leve
+    async def fake_processing():
+        await asyncio.sleep(2)  # simula trabalho
+        jobs[job_id]["status"] = "completed"
 
-    return {"job_id": job_id, "status": "queued"}
+    asyncio.create_task(fake_processing())
 
+    return {"job_id": job_id}
 
-# ------------------------------
-# ENDPOINT: STATUS DO JOB
-# ------------------------------
-
+# Rota para consultar o status do job
 @app.get("/job-status/{job_id}")
 def job_status(job_id: str):
-    if job_id not in JOBS:
+    job = jobs.get(job_id)
+    if not job:
         return {"status": "not_found"}
-
-    return {
-        "status": JOBS[job_id]["status"],
-        "result_url": JOBS[job_id]["result_url"],
-        "error": JOBS[job_id]["error"]
-    }
-
-
-# ------------------------------
-# ENDPOINT: DOWNLOAD FINAL
-# ------------------------------
-
-@app.get("/download/{job_id}")
-def download_result(job_id: str):
-    if job_id not in JOBS:
-        return {"error": "job_not_found"}
-
-    path = JOBS[job_id]["result_url"]
-
-    if not path or not os.path.exists(path):
-        return {"error": "file_not_ready"}
-
-    return FileResponse(
-        path,
-        media_type="video/mp4",
-        filename=f"papi_output_{job_id}.mp4"
-    )
+    return job
