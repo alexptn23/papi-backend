@@ -6,6 +6,7 @@ import uuid
 
 app = FastAPI()
 
+
 # Modelo de entrada: SEMPRE { "input": "mediaId" }
 class MediaInput(BaseModel):
     input: str  # media_id vindo do frontend
@@ -115,3 +116,6 @@ async def embed_subtitles(payload: MediaInput):
     """
     media_id = payload.input
     return {"status": "ok", "media_id": media_id}
+
+
+# force redeploy
